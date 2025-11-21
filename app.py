@@ -1,10 +1,11 @@
 import streamlit as st
 import json
-import streamlit.components.v1 as components # ★★★★★ 修正点1: componentsをインポート
+import streamlit.components.v1 as components
+import re  # ★★★★★ 修正点: 正規表現モジュールを追加
 
 # --- StreamlitアプリケーションのUI ---
 
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_title="Mermaid Editor")
 
 st.title("🧜‍♀️ Mermaid記法 システム図ジェネレーター (スタンドアロン版)")
 st.write(
@@ -14,6 +15,7 @@ st.write(
 st.info("ℹ️ このアプリは外部サービスを利用せず、お使いのブラウザ内ですべての処理を実行します。")
 
 # サンプル用のMermaidコード
+# []の中に()があるケース（エラーになりやすい例）を含めています
 DEFAULT_MERMAID_CODE = """
 graph TD
     A[クライアント] --> B{ロードバランサー};
@@ -21,7 +23,8 @@ graph TD
     B --> D[Webサーバー2];
     C --> E(データベース);
     D --> E(データベース);
-    E --> F[データ分析基盤];
+    E --> F[データ分析基盤(BigQuery)];
+    F --> G[レポート(日次)];
 """
 
 # 画面を2カラムに分割
@@ -144,24 +147,54 @@ MERMAID_TEMPLATE = """
 </html>
 """
 
+# ★★★★★ 追加機能: []内の()を処理する関数 ★★★★★
+def sanitize_mermaid_brackets(code):
+    """
+    Mermaidコード内で [] の中に () が含まれている場合、
+    その文字列全体を "" で囲むように置換します。
+    例: A[Func(x)] -> A["Func(x)"]
+    """
+    def replace_brackets(match):
+        content = match.group(1) # []の中身
+        # 中身に ( または ) が含まれているかチェック
+        if '(' in content or ')' in content:
+            # 既にダブルクォートで囲まれている場合は何もしない
+            stripped = content.strip()
+            if stripped.startswith('"') and stripped.endswith('"'):
+                return f'[{content}]'
+            # ダブルクォートで囲んで返す
+            return f'["{content}"]'
+        
+        # ()が含まれていなければそのまま
+        return f'[{content}]'
+
+    # 正規表現で [任意の文字] を検索して置換関数を適用
+    # \[ : [のエスケープ
+    # ([^\]]+) : ]以外の文字が1文字以上続く（グループ1としてキャプチャ）
+    # \] : ]のエスケープ
+    return re.sub(r'\[([^\]]+)\]', replace_brackets, code)
+
+
 with col2:
     st.subheader("システム図プレビュー")
     
     if mermaid_code:
+        # ★★★★★ 修正点: 入力されたコードをサニタイズ（自動補正） ★★★★★
+        processed_code = sanitize_mermaid_brackets(mermaid_code)
+
         # Streamlitの現在のテーマ（light/dark）を取得
         st_theme = st.get_option("theme.base")
         mermaid_theme = "dark" if st_theme == "dark" else "default"
         font_color = "white" if st_theme == "dark" else "black"
 
         html_code = MERMAID_TEMPLATE.replace(
-            "__MERMAID_CODE_JSON__", json.dumps(mermaid_code)
+            "__MERMAID_CODE_JSON__", json.dumps(processed_code) # 補正後のコードを使用
         ).replace(
             "__THEME__", mermaid_theme
         ).replace(
             "__FONT_COLOR__", font_color
         )
         
-        # ★★★★★ 修正点2: st.html() を components.html() に変更 ★★★★★
         components.html(html_code, height=620, scrolling=True)
     else:
         st.warning("左側のエリアにMermaidコードを入力してください。")
